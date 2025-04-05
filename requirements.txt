@@ -1,0 +1,8 @@
+Flask
+python-docx
+PyPDF2
+nltk
+scikit-learn
+spacy
+werkzeug
+flask-cors
