@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Resume Parser ATS</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.5/font/bootstrap-icons.css" rel="stylesheet">
+  <style>
+    body { background: #f8f9fa; }
+    .resume-card { margin-bottom: 1rem; border-radius: 1rem; box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075); }
+    .skill-badge { margin: 0.2rem; padding: 0.4rem 0.6rem; background: #e9ecef; border-radius: 0.3rem; display: inline-block; }
+    .fade-in { animation: fadeIn 0.3s ease-in-out; }
+    @keyframes fadeIn { from {opacity: 0;} to {opacity: 1;} }
+    .raw-text { background-color: #f1f1f1; font-size: 0.9rem; white-space: pre-wrap; }
+  </style>
+</head>
+<body>
+
+<div class="container py-4">
+  <h2 class="mb-4">📄 Resume Parser ATS</h2>
+
+  <form id="uploadForm" enctype="multipart/form-data" class="mb-3">
+    <div class="input-group">
+      <input type="file" class="form-control" id="resumeFile" accept=".pdf,.docx" required />
+      <button class="btn btn-primary" id="processBtn" type="submit">Upload Resume</button>
+    </div>
+    <div class="form-text">Supported formats: PDF, DOCX</div>
+  </form>
+
+  <div class="row mb-3">
+    <div class="col-md-6">
+      <input type="text" id="searchInput" class="form-control" placeholder="Search by skills (e.g., Python, JavaScript)" />
+    </div>
+    <div class="col-md-3">
+      <select id="sortSelect" class="form-select">
+        <option value="">Sort by...</option>
+        <option value="score_high">Score: High to Low</option>
+        <option value="score_low">Score: Low to High</option>
+      </select>
+    </div>
+    <div class="col-md-3">
+      <button class="btn btn-outline-secondary w-100" id="searchBtn">Search</button>
+    </div>
+  </div>
+
+  <div id="resultsContainer"></div>
+
+  <div id="loadingOverlay" class="d-none text-center my-5">
+    <div class="spinner-border text-primary" role="status"></div>
+    <p>Processing resume...</p>
+  </div>
+
+  <div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div class="toast align-items-center text-bg-danger" id="errorToast" role="alert">
+      <div class="d-flex">
+        <div class="toast-body">Error occurred</div>
+        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+  const uploadForm = document.getElementById('uploadForm');
+  const resumeFile = document.getElementById('resumeFile');
+  const processBtn = document.getElementById('processBtn');
+  const loadingOverlay = document.getElementById('loadingOverlay');
+  const resultsContainer = document.getElementById('resultsContainer');
+  const searchInput = document.getElementById('searchInput');
+  const searchBtn = document.getElementById('searchBtn');
+  const sortSelect = document.getElementById('sortSelect');
+  const errorToast = new bootstrap.Toast(document.getElementById('errorToast'));
+
+  let processedResumes = [];
+
+  uploadForm.addEventListener('submit', async function(e) {
+    e.preventDefault();
+    const file = resumeFile.files[0];
+    if (!file) return showError('Please select a file.');
+
+    toggleLoading(true);
+    const formData = new FormData();
+    formData.append('resume', file);
+
+    try {
+      const response = await fetch('http://localhost:5000/upload', {
+        method: 'POST',
+        body: formData
+      });
+      if (!response.ok) throw new Error('Upload failed');
+
+      const data = await response.json();
+      processedResumes.unshift(data);
+      displayResumes(processedResumes);
+      uploadForm.reset();
+    } catch (error) {
+      console.error(error);
+      showError('Failed to process resume.');
+    } finally {
+      toggleLoading(false);
+    }
+  });
+
+  searchBtn.addEventListener('click', function() {
+    const term = searchInput.value.toLowerCase();
+    const filtered = processedResumes.filter(r => r.skills.some(s => s.toLowerCase().includes(term)));
+    displayResumes(filtered);
+  });
+
+  sortSelect.addEventListener('change', function() {
+    const sorted = [...processedResumes];
+    if (this.value === 'score_high') sorted.sort((a, b) => b.ats_score - a.ats_score);
+    if (this.value === 'score_low') sorted.sort((a, b) => a.ats_score - b.ats_score);
+    displayResumes(sorted);
+  });
+
+  function displayResumes(resumes) {
+    resultsContainer.innerHTML = '';
+    if (resumes.length === 0) {
+      resultsContainer.innerHTML = `<div class="alert alert-info">No resumes found matching your criteria.</div>`;
+      return;
+    }
+    resumes.forEach(resume => {
+      resultsContainer.appendChild(createResumeCard(resume));
+    });
+  }
+
+  function createResumeCard(resume) {
+    const card = document.createElement('div');
+    card.className = 'card resume-card fade-in';
+    const scoreColor = getScoreColor(resume.ats_score);
+
+    card.innerHTML = `
+      <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">${resume.name || 'Unknown'}</h5>
+        <span class="badge bg-${scoreColor}">ATS Score: ${resume.ats_score}%</span>
+      </div>
+      <div class="card-body">
+        <div class="row">
+          <div class="col-md-6">
+            <p><i class="bi bi-envelope"></i> <a href="mailto:${resume.email}">${resume.email}</a></p>
+            <p><i class="bi bi-telephone"></i> <a href="tel:${resume.phone}">${resume.phone}</a></p>
+            ${resume.linkedin ? `<p><i class="bi bi-linkedin"></i> <a href="${resume.linkedin}" target="_blank">LinkedIn</a></p>` : ''}
+          </div>
+          <div class="col-md-6">
+            <div class="progress mb-2">
+              <div class="progress-bar bg-${scoreColor}" role="progressbar" style="width: ${resume.ats_score}%" aria-valuenow="${resume.ats_score}" aria-valuemin="0" aria-valuemax="100"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="skills-section mt-3">
+          <h6>Skills</h6>
+          <div>${resume.skills.map(skill => `<span class="skill-badge">${skill}</span>`).join(' ')}</div>
+        </div>
+
+        <div class="mt-3">
+          <button class="btn btn-sm btn-outline-primary" type="button" data-bs-toggle="collapse" data-bs-target="#rawText${resume.id}">View Raw Text</button>
+          <div class="collapse mt-2" id="rawText${resume.id}">
+            <div class="card card-body raw-text"><pre class="mb-0">${resume.raw_text}</pre></div>
+          </div>
+        </div>
+      </div>`;
+
+    return card;
+  }
+
+  function toggleLoading(show) {
+    loadingOverlay.classList.toggle('d-none', !show);
+    processBtn.disabled = show;
+  }
+
+  function showError(message) {
+    document.querySelector('#errorToast .toast-body').textContent = message;
+    errorToast.show();
+  }
+
+  function getScoreColor(score) {
+    if (score >= 80) return 'success';
+    if (score >= 60) return 'warning';
+    return 'danger';
+  }
+});
+</script>
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
